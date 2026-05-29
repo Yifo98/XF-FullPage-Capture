@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "XF FullPage Capture",
+  "short_name": "XF Capture",
+  "description": "Capture full pages and inner scroll containers, then export PNG, JPEG, paginated images, or PDF.",
+  "version": "0.4.8",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "XF FullPage Capture",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "unlimitedStorage",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}

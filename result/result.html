@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>XF FullPage Capture Result</title>
+    <link rel="stylesheet" href="./result.css">
+  </head>
+  <body>
+    <header class="app-bar">
+      <div>
+        <p class="eyebrow">XF FullPage Capture</p>
+        <h1 id="title">正在整理截图</h1>
+        <p id="meta" class="meta">等待后台传回截图切片...</p>
+      </div>
+      <div class="actions">
+        <button id="savePng" type="button" disabled>PNG</button>
+        <button id="savePagedPng" type="button" disabled>分页 PNG</button>
+        <button id="saveJpeg" type="button" disabled>JPEG</button>
+        <button id="savePagedJpeg" type="button" disabled>分页 JPEG</button>
+        <button id="savePdf" type="button" disabled>分页 PDF</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="panel">
+        <section class="panel-section">
+          <h2>分页</h2>
+          <label>
+            纸张
+            <select id="paper">
+              <option value="a4">A4</option>
+              <option value="a3">A3</option>
+              <option value="a5">A5</option>
+              <option value="b5">B5</option>
+              <option value="letter">Letter</option>
+              <option value="legal">Legal</option>
+              <option value="tabloid">Tabloid</option>
+            </select>
+          </label>
+          <label>
+            方向
+            <select id="orientation">
+              <option value="portrait">竖版</option>
+              <option value="landscape">横版</option>
+            </select>
+          </label>
+          <label class="check-row">
+            <input id="smartSplit" type="checkbox" checked>
+            智能避开文字切页
+          </label>
+          <label class="check-row">
+            <input id="includeMeta" type="checkbox" checked>
+            分页页脚显示页码和时间
+          </label>
+          <p id="pageGuideInfo" class="hint-text">分页线会显示在右侧预览里。</p>
+        </section>
+
+        <section class="panel-section">
+          <h2>选区和缩放</h2>
+          <label class="check-row">
+            <input id="enableCrop" type="checkbox">
+            使用选区导出
+          </label>
+          <div class="field-grid" aria-label="裁切区域">
+            <label>
+              X
+              <input id="cropX" type="number" min="0" step="1" value="0">
+            </label>
+            <label>
+              Y
+              <input id="cropY" type="number" min="0" step="1" value="0">
+            </label>
+            <label>
+              宽
+              <input id="cropWidth" type="number" min="1" step="1" value="1">
+            </label>
+            <label>
+              高
+              <input id="cropHeight" type="number" min="1" step="1" value="1">
+            </label>
+          </div>
+          <label>
+            导出缩放
+            <input id="exportScale" type="range" min="0.5" max="2" step="0.05" value="1">
+            <span id="exportScaleValue" class="value-readout">100%</span>
+          </label>
+          <div class="mini-actions">
+            <button id="cropFull" type="button" disabled>全图</button>
+            <button id="cropVisible" type="button" disabled>当前视图</button>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <h2>自定义分页</h2>
+          <label class="check-row">
+            <input id="customPagination" type="checkbox">
+            使用自定义分页线
+          </label>
+          <p class="hint-text warning-text">自定义分页会按每段内容缩放到 PDF 页面；如果某一页过长、过短或分页线过密，导出的 PDF 可能出现内容挤压、留白或比例不理想。</p>
+          <p id="pageRiskInfo" class="hint-text page-risk-info">开启自定义分页线后，会在右侧显示 PDF 参考区。</p>
+          <div class="mini-actions">
+            <button id="seedPageCuts" type="button" disabled>按纸张生成</button>
+            <button id="addPageCut" type="button" aria-keyshortcuts="A + =" disabled>新增分页线</button>
+          </div>
+          <div class="mini-actions">
+            <button id="deletePageCut" type="button" aria-keyshortcuts="Delete Backspace" disabled>删除选中线</button>
+            <button id="clearPageCuts" type="button" disabled>清除分页线</button>
+          </div>
+          <p class="hint-text shortcut-hint">快捷键：A / + 在鼠标位置新增分页线；选中分页线后按 Delete / Backspace 删除。</p>
+          <p id="pageCutList" class="hint-text">自动分页。</p>
+        </section>
+
+        <section class="panel-section">
+          <h2>缓存</h2>
+          <div class="mini-actions">
+            <button id="refreshCaptureCache" type="button" disabled>查看缓存</button>
+            <button id="clearCaptureCache" type="button" disabled>清空缓存</button>
+          </div>
+          <button id="deleteCaptureCache" type="button" disabled>删除本次缓存</button>
+          <div id="cacheList" class="cache-list" aria-live="polite"></div>
+          <p id="cacheInfo" class="hint-text">关闭结果页后，本次截图缓存仍会暂存在浏览器本机。</p>
+        </section>
+        <p id="status" class="status">初始化中...</p>
+        <details class="diagnostics">
+          <summary>刷新诊断</summary>
+          <p id="reloadInfo" class="hint-text">等待页面加载信息...</p>
+        </details>
+      </aside>
+
+      <section class="preview-wrap" aria-label="Screenshot preview">
+        <div id="canvasStage" class="canvas-stage">
+          <canvas id="preview"></canvas>
+          <div id="cropOverlay" class="crop-overlay" hidden>
+            <div class="crop-move-layer" data-crop-action="move"></div>
+            <div class="crop-edge crop-edge-n" data-crop-action="n"></div>
+            <div class="crop-edge crop-edge-e" data-crop-action="e"></div>
+            <div class="crop-edge crop-edge-s" data-crop-action="s"></div>
+            <div class="crop-edge crop-edge-w" data-crop-action="w"></div>
+            <div class="crop-handle crop-handle-n" data-crop-action="n"></div>
+            <div class="crop-handle crop-handle-e" data-crop-action="e"></div>
+            <div class="crop-handle crop-handle-s" data-crop-action="s"></div>
+            <div class="crop-handle crop-handle-w" data-crop-action="w"></div>
+            <div class="crop-handle crop-handle-nw" data-crop-action="nw"></div>
+            <div class="crop-handle crop-handle-ne" data-crop-action="ne"></div>
+            <div class="crop-handle crop-handle-se" data-crop-action="se"></div>
+            <div class="crop-handle crop-handle-sw" data-crop-action="sw"></div>
+          </div>
+          <div id="pageGuideOverlay" class="page-guide-overlay" aria-hidden="true"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./result.js"></script>
+  </body>
+</html>
