@@ -262,6 +262,26 @@ label {
   color: #92400e;
 }
 
+.workflow-info {
+  padding: 7px 9px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 7px;
+  background: rgba(20, 184, 166, 0.07);
+  color: #115e59;
+}
+
+.workflow-info.is-auto {
+  border-color: rgba(37, 99, 235, 0.2);
+  background: rgba(37, 99, 235, 0.07);
+  color: #1d4ed8;
+}
+
+.workflow-info.is-manual {
+  border-color: rgba(217, 119, 6, 0.36);
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .shortcut-hint {
   padding: 6px 8px;
   border-radius: 7px;
@@ -704,6 +724,76 @@ canvas {
 
 .page-guide.is-automatic::before {
   display: none;
+}
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(248, 250, 252, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.loading-overlay[hidden] {
+  display: none;
+}
+
+.loading-card {
+  display: grid;
+  gap: 12px;
+  width: min(440px, 100%);
+  padding: 18px 20px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.loading-runner {
+  position: relative;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.loading-runner::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: #0f766e;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.82), 0 0 18px rgba(15, 118, 110, 0.28);
+  content: "";
+  animation: loading-runner 1.15s ease-in-out infinite;
+}
+
+.loading-title {
+  margin: 0;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.loading-detail {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@keyframes loading-runner {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(250%);
+  }
 }
 
 @media (max-width: 860px) {

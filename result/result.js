@@ -32,6 +32,7 @@ const elements = {
   cropFull: document.querySelector("#cropFull"),
   cropVisible: document.querySelector("#cropVisible"),
   customPagination: document.querySelector("#customPagination"),
+  paginationWorkflowInfo: document.querySelector("#paginationWorkflowInfo"),
   seedPageCuts: document.querySelector("#seedPageCuts"),
   addPageCut: document.querySelector("#addPageCut"),
   deletePageCut: document.querySelector("#deletePageCut"),
@@ -50,7 +51,10 @@ const elements = {
   sectionList: document.querySelector("#sectionList"),
   sectionMergeInfo: document.querySelector("#sectionMergeInfo"),
   reloadInfo: document.querySelector("#reloadInfo"),
-  pageGuideOverlay: document.querySelector("#pageGuideOverlay")
+  pageGuideOverlay: document.querySelector("#pageGuideOverlay"),
+  loadingOverlay: document.querySelector("#loadingOverlay"),
+  loadingTitle: document.querySelector("#loadingTitle"),
+  loadingDetail: document.querySelector("#loadingDetail")
 };
 
 const paperSizes = {
@@ -69,6 +73,7 @@ let cropDrag = null;
 let pageCutDrag = null;
 let lastPreviewPointer = null;
 let manualCutFractions = [];
+let manualCutMode = "auto";
 let selectedPageCutIndex = -1;
 let editorStateSaveTimer = 0;
 let isRestoringEditorState = false;
@@ -97,6 +102,7 @@ const LOAD_DIAGNOSTICS = readLoadDiagnostics();
 
 init().catch((error) => {
   reportHandledError(error);
+  hideLoadingOverlay();
   setStatus(error.message || String(error), true);
 });
 
@@ -106,7 +112,7 @@ elements.savePng.addEventListener("click", () => {
 
 elements.savePagedPng.addEventListener("click", async () => {
   try {
-    setBusy(true, "正在生成高清分页 PNG ZIP...");
+    setBusy(true, "正在生成高清分页 PNG ZIP...", "会按当前选区和分页线逐页渲染高清图片。");
     const zipBytes = await buildPagedPngZip();
     downloadBlob(new Blob([zipBytes], { type: "application/zip" }), `${baseFilename()}-paged-png.zip`);
     setStatus("分页 PNG ZIP 已交给浏览器下载。");
@@ -124,7 +130,7 @@ elements.saveJpeg.addEventListener("click", () => {
 
 elements.savePagedJpeg.addEventListener("click", async () => {
   try {
-    setBusy(true, "正在生成高清分页 JPEG ZIP...");
+    setBusy(true, "正在生成高清分页 JPEG ZIP...", "会按当前选区和分页线逐页渲染高清图片。");
     const zipBytes = await buildPagedImageZip({
       type: "image/jpeg",
       extension: "jpg",
@@ -143,13 +149,15 @@ elements.savePagedJpeg.addEventListener("click", async () => {
 
 elements.savePdf.addEventListener("click", async () => {
   try {
+    syncAutoManualCutsToCurrentLayout();
+    updatePageGuides();
     const pdfRisk = getCurrentPdfRiskAnalysis();
     if (pdfRisk.items.length > 0 && !confirm(buildPdfRiskConfirmMessage(pdfRisk))) {
       setStatus("已取消直接 PDF 导出。建议先导出分页 PNG ZIP，再用图片合并 PDF。");
       return;
     }
 
-    setBusy(true, "正在生成高清分页 PDF...");
+    setBusy(true, "正在生成高清分页 PDF...", "会使用当前选区和最新分页线重新渲染。");
     const pdfBytes = await buildPdfBytes();
     downloadBlob(new Blob([pdfBytes], { type: "application/pdf" }), `${baseFilename()}.pdf`);
     setStatus("PDF 已交给浏览器下载。");
@@ -172,6 +180,7 @@ for (const input of [elements.cropX, elements.cropY, elements.cropWidth, element
 
 elements.enableCrop.addEventListener("change", () => {
   updateCropOverlay();
+  syncAutoManualCutsToCurrentLayout();
   updatePageGuides();
   scheduleEditorStateSave();
 });
@@ -186,20 +195,25 @@ elements.cropVisible.addEventListener("click", () => {
 
 elements.exportScale.addEventListener("input", () => {
   updateScaleReadout();
+  syncAutoManualCutsToCurrentLayout();
   updatePageGuides();
   scheduleEditorStateSave();
 });
 
 for (const input of [elements.paper, elements.orientation, elements.includeMeta]) {
   input.addEventListener("change", () => {
+    syncAutoManualCutsToCurrentLayout();
     updatePageGuides();
     scheduleEditorStateSave();
   });
 }
 
 elements.customPagination.addEventListener("change", () => {
-  if (elements.customPagination.checked && manualCutFractions.length === 0) {
+  if (elements.customPagination.checked && (manualCutFractions.length === 0 || manualCutMode === "auto")) {
     seedManualCutsFromAutomatic();
+  }
+  if (!elements.customPagination.checked) {
+    manualCutMode = "auto";
   }
   updatePaginationControls();
   updatePageGuides();
@@ -224,6 +238,7 @@ elements.deletePageCut.addEventListener("click", () => {
 
 elements.clearPageCuts.addEventListener("click", () => {
   manualCutFractions = [];
+  manualCutMode = "auto";
   selectedPageCutIndex = -1;
   elements.customPagination.checked = false;
   updatePaginationControls();
@@ -398,6 +413,7 @@ async function init() {
   elements.title.textContent = capture.source.title || "完整页面截图";
   elements.meta.textContent = `${capture.target.label} · ${capture.target.mode === "inner-scroll" ? "内层滚动容器" : "页面滚动"} · ${capture.slices.length} 张切片${formatSegmentMeta()} · ${capture.source.url}`;
   updateSegmentControls();
+  updateLoadingMessage("正在拼接截图切片...", "页面内容较多时需要读取和拼接多张切片，请稍等。");
   setStatus("正在拼接截图切片...");
 
   await composePreview();
@@ -417,6 +433,7 @@ async function init() {
   setStatus(restored
     ? `已恢复上次编辑草稿：${elements.canvas.width} x ${elements.canvas.height}px。${sizeNote}`
     : `拼接完成：${elements.canvas.width} x ${elements.canvas.height}px。${sizeNote}`);
+  hideLoadingOverlay();
   updateReloadDiagnostics();
 }
 
@@ -463,7 +480,7 @@ async function openSourceAtSegmentEnd() {
     return;
   }
 
-  setBusy(true, "正在回到原文结束位置...");
+  setBusy(true, "正在回到原文结束位置...", "正在定位原始页面的上次结束位置。");
   try {
     const response = await chrome.runtime.sendMessage({
       type: "OPEN_SOURCE_AT_SCROLL",
@@ -484,7 +501,7 @@ async function startCaptureAtSegmentEnd() {
     return;
   }
 
-  setBusy(true, "正在回到原文结束位置并继续截图...");
+  setBusy(true, "正在回到原文结束位置并继续截图...", "正在恢复原文标签页并启动下一段截图。");
   try {
     const response = await chrome.runtime.sendMessage({
       type: "START_CAPTURE_FROM_SOURCE_SCROLL",
@@ -715,6 +732,9 @@ function restoreEditorState() {
       : [];
     normalizeManualCutFractions();
     elements.customPagination.checked = Boolean(state.customPagination && manualCutFractions.length > 0);
+    manualCutMode = elements.customPagination.checked
+      ? state.manualCutMode === "auto" ? "auto" : "manual"
+      : "auto";
 
     updateCropOverlay();
     updateScaleReadout();
@@ -783,6 +803,7 @@ function buildCurrentEditorState() {
     crop,
     exportScale: getExportScale(),
     customPagination: elements.customPagination.checked,
+    manualCutMode,
     manualCutFractions: [...normalizeManualCutFractions()]
   };
 }
@@ -1138,7 +1159,9 @@ async function composePreview() {
     const dh = Math.round(Math.min(slice.cropRect.height, slice.targetVisibleHeight) * canvasScale);
 
     context.drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh);
-    setStatus(`正在拼接截图切片 ${index + 1}/${capture.slices.length}...${formatCompositionSizeNote()}`);
+    const message = `正在拼接截图切片 ${index + 1}/${capture.slices.length}...${formatCompositionSizeNote()}`;
+    updateLoadingMessage(message, "内容越长，首次预览需要的拼接时间越久；最终导出仍会使用原始切片。");
+    setStatus(message);
   }
 }
 
@@ -1205,7 +1228,7 @@ function assertCanvasSize(width, height) {
 
 async function downloadEditedCanvas(type, extension, quality) {
   try {
-    setBusy(true, `正在生成 ${extension.toUpperCase()}...`);
+    setBusy(true, `正在生成 ${extension.toUpperCase()}...`, "正在按当前选区渲染导出图片。");
     const canvas = getEditedCanvas();
     const blob = await canvasToBlob(canvas, type, quality);
     downloadBlob(blob, `${baseFilename()}.${extension}`);
@@ -1241,7 +1264,9 @@ async function buildPagedImageZip({ type, extension, quality, label }) {
       name: `${rootName}-page-${String(i + 1).padStart(pad, "0")}.${extension}`,
       bytes: new Uint8Array(await blob.arrayBuffer())
     });
-    setStatus(`正在生成分页 ${label} ${i + 1}/${pageCount}...`);
+    const message = `正在生成分页 ${label} ${i + 1}/${pageCount}...`;
+    updateLoadingMessage(message, "正在从原始切片逐页渲染，预览模糊不会影响导出清晰度。");
+    setStatus(message);
   }
 
   return buildZip(files);
@@ -1255,6 +1280,7 @@ async function buildPdfBytes() {
   for (let i = 0; i < cuts.length - 1; i += 1) {
     const pageCanvas = await renderHighResCanvasSlice(exportState, cuts[i], cuts[i + 1]);
     addCanvasPageToPdf(pdf, pageCanvas, exportState.outputWidth, elements.includeMeta.checked ? footerText(i + 1, cuts.length - 1) : "");
+    updateLoadingMessage(`正在生成分页 PDF ${i + 1}/${cuts.length - 1}...`, "正在从原始切片逐页渲染 PDF。");
   }
 
   return pdf.build();
@@ -1268,7 +1294,7 @@ async function exportMergedSectionsPdf() {
   }
 
   const mergeMode = "draft";
-  setBusy(true, "正在准备分节合并 PDF...");
+  setBusy(true, "正在准备分节合并 PDF...", "正在读取已选分节和各自的编辑草稿。");
   try {
     const pdfBytes = await buildMergedSectionsPdfBytes(ids, { mergeMode });
     downloadBlob(new Blob([pdfBytes], { type: "application/pdf" }), `${sectionMergeFilename()}-merged.pdf`);
@@ -1305,7 +1331,9 @@ async function buildMergedSectionsPdfBytes(ids, options = {}) {
         : "";
       addCanvasPageToPdf(pdf, pageCanvas, section.exportState.outputWidth, footer);
       const stateLabel = options.mergeMode === "draft" && !section.hasEditorState ? "，该节未找到草稿，使用完整范围" : "";
-      setStatus(`正在合并第 ${section.sectionIndex + 1}/${sections.length} 节，PDF 第 ${pageNumber}/${totalPages} 页${stateLabel}...`);
+      const message = `正在合并第 ${section.sectionIndex + 1}/${sections.length} 节，PDF 第 ${pageNumber}/${totalPages} 页${stateLabel}...`;
+      updateLoadingMessage(message, "正在读取分节原始切片并写入合并 PDF。");
+      setStatus(message);
     }
   }
 
@@ -1660,8 +1688,23 @@ function seedManualCutsFromAutomatic() {
   const outputHeight = Math.max(1, Math.round(crop.height * scale));
   const cuts = buildRegularPageCuts(outputWidth, outputHeight);
   manualCutFractions = cuts.slice(1, -1).map((cut) => cut / outputHeight);
+  manualCutMode = "auto";
   selectedPageCutIndex = -1;
   normalizeManualCutFractions();
+}
+
+function syncAutoManualCutsToCurrentLayout() {
+  if (!elements.customPagination.checked || manualCutMode !== "auto") {
+    return false;
+  }
+
+  const previous = manualCutFractions.join(",");
+  seedManualCutsFromAutomatic();
+  return previous !== manualCutFractions.join(",");
+}
+
+function markManualCutsEdited() {
+  manualCutMode = "manual";
 }
 
 function addManualCutAtPreferredPosition() {
@@ -1678,6 +1721,7 @@ function addManualCutAtPreferredPosition() {
   }
 
   selectedPageCutIndex = inserted.index;
+  markManualCutsEdited();
   return preferred.source;
 }
 
@@ -1820,8 +1864,10 @@ function deleteSelectedManualCut() {
   }
 
   manualCutFractions.splice(selectedPageCutIndex, 1);
+  markManualCutsEdited();
   if (manualCutFractions.length === 0) {
     selectedPageCutIndex = -1;
+    manualCutMode = "auto";
     elements.customPagination.checked = false;
   } else {
     selectedPageCutIndex = Math.min(selectedPageCutIndex, manualCutFractions.length - 1);
@@ -2015,6 +2061,7 @@ function updatePageGuideText(cuts, isCustom, pdfRisk) {
   const orientationLabel = elements.orientation.value === "landscape" ? "横版" : "竖版";
   const paperLabel = elements.paper.selectedOptions[0]?.textContent || "A4";
   elements.pageGuideInfo.textContent = `${paperLabel} ${orientationLabel}：约 ${pageCount} 页`;
+  updatePaginationWorkflowInfo(isCustom);
   if (isCustom) {
     const parts = normalizeManualCutFractions().map((fraction) => `${Math.round(fraction * 100)}%`);
     const selected = selectedPageCutIndex >= 0 && selectedPageCutIndex < parts.length
@@ -2034,6 +2081,27 @@ function updatePageGuideText(cuts, isCustom, pdfRisk) {
     elements.pageCutList.textContent = `自动分页：约 ${pageCount} 页。`;
     updatePageRiskInfo(null);
   }
+}
+
+function updatePaginationWorkflowInfo(isCustom) {
+  if (!elements.paginationWorkflowInfo) {
+    return;
+  }
+
+  elements.paginationWorkflowInfo.classList.remove("is-auto", "is-manual");
+  if (!isCustom) {
+    elements.paginationWorkflowInfo.textContent = "建议先框选要保留的内容范围，去掉边栏和空白，再开启自定义分页线。";
+    return;
+  }
+
+  if (manualCutMode === "auto") {
+    elements.paginationWorkflowInfo.classList.add("is-auto");
+    elements.paginationWorkflowInfo.textContent = "当前分页线按选区、纸张方向和导出缩放自动生成；继续调整选区时会同步重算。";
+    return;
+  }
+
+  elements.paginationWorkflowInfo.classList.add("is-manual");
+  elements.paginationWorkflowInfo.textContent = "当前分页线已手动编辑；调整选区后会刷新风险提示，不会覆盖你手动挪好的分页线。";
 }
 
 function createEmptyPdfRiskAnalysis() {
@@ -2230,6 +2298,7 @@ function finishCropDrag(event) {
     resetCropToFull();
   }
   cropDrag = null;
+  setPaginationLayoutStatus("已根据当前选区刷新分页参考。");
   saveEditorStateNow();
 }
 
@@ -2381,6 +2450,7 @@ function updatePageCutDrag(event) {
   const next = index < manualCutFractions.length - 1 ? manualCutFractions[index + 1] : 1;
   const fraction = (point.y - crop.y) / Math.max(1, crop.height);
   manualCutFractions[index] = clamp(fraction, previous + 0.01, next - 0.01);
+  markManualCutsEdited();
   updatePageGuides();
   scheduleEditorStateSave();
 }
@@ -2394,7 +2464,23 @@ function finishPageCutDrag(event) {
   pageCutDrag = null;
   normalizeManualCutFractions();
   updatePageGuides();
+  setPaginationLayoutStatus("分页线在 PDF 参考区内。");
   saveEditorStateNow();
+}
+
+function setPaginationLayoutStatus(message) {
+  if (!elements.customPagination.checked || manualCutFractions.length === 0) {
+    return;
+  }
+
+  const pdfRisk = getCurrentPdfRiskAnalysis();
+  updatePageRiskInfo(pdfRisk);
+  if (pdfRisk.items.length > 0) {
+    setStatus(buildPdfRiskSummary(pdfRisk), true);
+    return;
+  }
+
+  setStatus(message);
 }
 
 function readCropInputs() {
@@ -2416,6 +2502,7 @@ function applyCropRect(rect, updateToggle = true) {
   elements.cropWidth.value = String(crop.width);
   elements.cropHeight.value = String(crop.height);
   updateCropOverlay();
+  syncAutoManualCutsToCurrentLayout();
   updatePageGuides();
   scheduleEditorStateSave();
 }
@@ -2665,10 +2752,15 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function setBusy(isBusy, message) {
+function setBusy(isBusy, message, detail = "") {
   setExportControlsEnabled(!isBusy);
   if (message) {
     setStatus(message);
+  }
+  if (isBusy) {
+    updateLoadingMessage(message || "正在处理...", detail || "长图处理可能需要一点时间，请稍等。");
+  } else {
+    hideLoadingOverlay();
   }
 }
 
@@ -2700,6 +2792,26 @@ function setExportControlsEnabled(enabled) {
 function setStatus(message, isError = false) {
   elements.status.textContent = message;
   elements.status.style.color = isError ? "#b42318" : "";
+}
+
+function updateLoadingMessage(title, detail = "") {
+  if (!elements.loadingOverlay) {
+    return;
+  }
+
+  elements.loadingOverlay.hidden = false;
+  elements.loadingOverlay.classList.add("is-visible");
+  elements.loadingTitle.textContent = title || "正在处理...";
+  elements.loadingDetail.textContent = detail || "长图处理可能需要一点时间，请稍等。";
+}
+
+function hideLoadingOverlay() {
+  if (!elements.loadingOverlay) {
+    return;
+  }
+
+  elements.loadingOverlay.classList.remove("is-visible");
+  elements.loadingOverlay.hidden = true;
 }
 
 function reportHandledError(error) {

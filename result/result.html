@@ -120,6 +120,7 @@
             <input id="customPagination" type="checkbox">
             使用自定义分页线
           </label>
+          <p id="paginationWorkflowInfo" class="hint-text workflow-info">建议先框选要保留的内容范围，去掉边栏和空白，再开启自定义分页线。</p>
           <p class="hint-text warning-text">自定义分页会按每段内容缩放到 PDF 页面；如果某一页过长、过短或分页线过密，导出的 PDF 可能出现内容挤压、留白或比例不理想。</p>
           <p id="pageRiskInfo" class="hint-text page-risk-info">开启自定义分页线后，会在右侧显示 PDF 参考区。</p>
           <div class="mini-actions">
@@ -173,6 +174,16 @@
         </div>
       </section>
     </main>
+
+    <div id="loadingOverlay" class="loading-overlay" role="status" aria-live="polite">
+      <div class="loading-card">
+        <div class="loading-runner" aria-hidden="true"></div>
+        <div>
+          <p id="loadingTitle" class="loading-title">正在拼接截图切片...</p>
+          <p id="loadingDetail" class="loading-detail">页面内容较多时需要读取多张切片，请稍等。</p>
+        </div>
+      </div>
+    </div>
 
     <script src="./result.js"></script>
   </body>

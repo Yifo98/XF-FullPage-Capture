@@ -605,10 +605,9 @@ label {
 }
 
 .loading-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  max-width: 420px;
+  display: grid;
+  gap: 12px;
+  width: min(440px, 100%);
   padding: 18px 20px;
   border: 1px solid rgba(15, 118, 110, 0.22);
   border-radius: 8px;
@@ -616,14 +615,25 @@ label {
   box-shadow: var(--shadow);
 }
 
-.loading-spinner {
-  flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  border: 3px solid rgba(15, 118, 110, 0.18);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
+.loading-runner {
+  position: relative;
+  overflow: hidden;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.loading-runner::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: #0f766e;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.82), 0 0 18px rgba(15, 118, 110, 0.28);
+  content: "";
+  animation: loading-runner 1.15s ease-in-out infinite;
 }
 
 .loading-title {
@@ -639,9 +649,13 @@ label {
   line-height: 1.45;
 }
 
-@keyframes spin {
+@keyframes loading-runner {
+  from {
+    transform: translateX(-110%);
+  }
+
   to {
-    transform: rotate(360deg);
+    transform: translateX(250%);
   }
 }
 

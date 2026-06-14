@@ -120,6 +120,7 @@ elements.exportPdf.addEventListener("click", () => {
 
 for (const input of [elements.paper, elements.orientation, elements.includeMeta]) {
   input.addEventListener("change", () => {
+    syncAutoPageCutsForAllSections();
     updateAllPageOverlays();
     renderActiveControls();
     saveAllSectionStates();
@@ -170,6 +171,7 @@ elements.enableCrop.addEventListener("change", () => {
   if (section.state.enableCrop && (!section.state.crop || isFullPreviewCrop(section, section.state.crop))) {
     section.state.crop = visiblePreviewCrop(section);
   }
+  syncAutoPageCutsForSection(section);
   updateSectionOverlay(section);
   renderActiveControls();
   saveSectionState(section);
@@ -186,6 +188,7 @@ for (const input of [elements.cropX, elements.cropY, elements.cropWidth, element
     }
     section.state.enableCrop = true;
     section.state.crop = normalizePreviewCrop(section, readCropInputs());
+    syncAutoPageCutsForSection(section);
     updateSectionOverlay(section);
     renderActiveControls();
     saveSectionState(section);
@@ -199,6 +202,7 @@ elements.exportScale.addEventListener("input", () => {
   }
   section.state.exportScale = getActiveExportScale();
   updateScaleReadout();
+  syncAutoPageCutsForSection(section);
   updateSectionPageOverlay(section);
   renderPageCutInfo(section);
   saveSectionState(section);
@@ -211,6 +215,7 @@ elements.cropFull.addEventListener("click", () => {
   }
   section.state.enableCrop = false;
   section.state.crop = fullPreviewCrop(section);
+  syncAutoPageCutsForSection(section);
   updateSectionOverlay(section);
   renderActiveControls();
   saveSectionState(section);
@@ -223,6 +228,7 @@ elements.cropVisible.addEventListener("click", () => {
   }
   section.state.enableCrop = true;
   section.state.crop = visiblePreviewCrop(section);
+  syncAutoPageCutsForSection(section);
   updateSectionOverlay(section);
   renderActiveControls();
   saveSectionState(section);
@@ -234,8 +240,11 @@ elements.customPagination.addEventListener("change", () => {
     return;
   }
   section.state.customPagination = elements.customPagination.checked;
-  if (section.state.customPagination && section.state.manualCutFractions.length === 0) {
-    section.state.manualCutFractions = seedPageCutFractions(section);
+  if (section.state.customPagination && (section.state.manualCutFractions.length === 0 || section.state.manualCutMode === "auto")) {
+    seedSectionPageCuts(section);
+  }
+  if (!section.state.customPagination) {
+    section.state.manualCutMode = "auto";
   }
   section.state.selectedPageCutIndex = -1;
   updateSectionPageOverlay(section);
@@ -249,8 +258,7 @@ elements.seedPageCuts.addEventListener("click", () => {
     return;
   }
   section.state.customPagination = true;
-  section.state.manualCutFractions = seedPageCutFractions(section);
-  section.state.selectedPageCutIndex = -1;
+  seedSectionPageCuts(section);
   updateSectionPageOverlay(section);
   renderActiveControls();
   saveSectionState(section);
@@ -264,6 +272,7 @@ elements.addPageCut.addEventListener("click", () => {
   section.state.customPagination = true;
   const fraction = preferredPageCutFraction(section);
   insertManualCut(section, fraction);
+  markSectionPageCutsEdited(section);
   updateSectionPageOverlay(section);
   renderActiveControls();
   saveSectionState(section);
@@ -275,9 +284,11 @@ elements.deletePageCut.addEventListener("click", () => {
     return;
   }
   section.state.manualCutFractions.splice(section.state.selectedPageCutIndex, 1);
+  markSectionPageCutsEdited(section);
   section.state.selectedPageCutIndex = Math.min(section.state.selectedPageCutIndex, section.state.manualCutFractions.length - 1);
   if (!section.state.manualCutFractions.length) {
     section.state.customPagination = false;
+    section.state.manualCutMode = "auto";
     section.state.selectedPageCutIndex = -1;
   }
   updateSectionPageOverlay(section);
@@ -292,6 +303,7 @@ elements.clearPageCuts.addEventListener("click", () => {
   }
   section.state.customPagination = false;
   section.state.manualCutFractions = [];
+  section.state.manualCutMode = "auto";
   section.state.selectedPageCutIndex = -1;
   updateSectionPageOverlay(section);
   renderActiveControls();
@@ -701,6 +713,7 @@ function handleEditorKeydown(event) {
     event.preventDefault();
     section.state.customPagination = true;
     insertManualCut(section, preferredPageCutFraction(section));
+    markSectionPageCutsEdited(section);
     updateSectionPageOverlay(section);
     renderActiveControls();
     saveSectionState(section);
@@ -714,9 +727,11 @@ function handleEditorKeydown(event) {
     }
     event.preventDefault();
     section.state.manualCutFractions.splice(section.state.selectedPageCutIndex, 1);
+    markSectionPageCutsEdited(section);
     section.state.selectedPageCutIndex = Math.min(section.state.selectedPageCutIndex, section.state.manualCutFractions.length - 1);
     if (!section.state.manualCutFractions.length) {
       section.state.customPagination = false;
+      section.state.manualCutMode = "auto";
       section.state.selectedPageCutIndex = -1;
     }
     updateSectionPageOverlay(section);
@@ -768,6 +783,7 @@ function copyStateBetweenSections(source, target) {
     }),
     exportScale: sourceState.exportScale,
     customPagination: sourceState.customPagination,
+    manualCutMode: sourceState.manualCutMode === "auto" ? "auto" : "manual",
     manualCutFractions: [...sourceState.manualCutFractions],
     selectedPageCutIndex: -1
   };
@@ -1071,6 +1087,7 @@ function updateDrag(event) {
     updateDraggedPageCut(section, activeDrag.index, point.y / section.canvas.height);
   } else {
     updateDraggedCrop(section, point);
+    syncAutoPageCutsForSection(section);
   }
   updateSectionOverlay(section);
   renderActiveControls();
@@ -1142,6 +1159,32 @@ function seedPageCutFractions(section) {
   return cuts.slice(1, -1).map((cut) => cut / exportState.outputHeight);
 }
 
+function seedSectionPageCuts(section) {
+  section.state.manualCutFractions = seedPageCutFractions(section);
+  section.state.manualCutMode = "auto";
+  section.state.selectedPageCutIndex = -1;
+}
+
+function syncAutoPageCutsForSection(section) {
+  if (!section?.state?.customPagination || section.state.manualCutMode !== "auto") {
+    return false;
+  }
+
+  const previous = section.state.manualCutFractions.join(",");
+  seedSectionPageCuts(section);
+  return previous !== section.state.manualCutFractions.join(",");
+}
+
+function syncAutoPageCutsForAllSections() {
+  for (const section of sections) {
+    syncAutoPageCutsForSection(section);
+  }
+}
+
+function markSectionPageCutsEdited(section) {
+  section.state.manualCutMode = "manual";
+}
+
 function preferredPageCutFraction(section) {
   const visible = visibleStageRect(section);
   const visibleCenter = visible.y + visible.height / 2;
@@ -1158,6 +1201,7 @@ function updateDraggedPageCut(section, index, fraction) {
   const previous = index > 0 ? section.state.manualCutFractions[index - 1] : 0;
   const next = index < section.state.manualCutFractions.length - 1 ? section.state.manualCutFractions[index + 1] : 1;
   section.state.manualCutFractions[index] = clamp(fraction, previous + 0.01, next - 0.01);
+  markSectionPageCutsEdited(section);
   section.state.selectedPageCutIndex = index;
 }
 
@@ -1178,6 +1222,7 @@ function normalizeEditorState(section, savedState) {
     crop: fullPreviewCrop(section),
     exportScale: 1,
     customPagination: false,
+    manualCutMode: "auto",
     manualCutFractions: [],
     selectedPageCutIndex: -1
   };
@@ -1191,6 +1236,9 @@ function normalizeEditorState(section, savedState) {
     enableCrop: Boolean(savedState.enableCrop),
     exportScale: clamp(Number(savedState.exportScale) || 1, 0.5, 2),
     customPagination: Boolean(savedState.customPagination),
+    manualCutMode: savedState.customPagination
+      ? savedState.manualCutMode === "auto" ? "auto" : "manual"
+      : "auto",
     manualCutFractions: Array.isArray(savedState.manualCutFractions)
       ? savedState.manualCutFractions.map(Number).filter(Number.isFinite)
       : [],
@@ -1243,6 +1291,7 @@ function saveSectionState(section) {
     crop: section.state.crop,
     exportScale: section.state.exportScale,
     customPagination: section.state.customPagination,
+    manualCutMode: section.state.manualCutMode || "manual",
     manualCutFractions: [...section.state.manualCutFractions]
   };
   try {
